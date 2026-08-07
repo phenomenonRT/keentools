@@ -7,16 +7,13 @@
 # Вариант 2 (локально, если уже скачали/склонировали репозиторий):
 #   cd keentools && sh install.sh
 #
-# В обоих случаях скрипт: проверяет Entware/opkg, ставит зависимости
-# (curl, jq) через opkg, копирует файлы в /opt/etc/keentools, делает всё
-# исполняемым и добавляет короткую команду "keentools".
+# Скрипт: спрашивает источник установки (GitHub или своё зеркало),
+# проверяет Entware/opkg, ставит зависимости (curl, jq) через opkg,
+# копирует файлы в /opt/etc/keentools, делает всё исполняемым и
+# добавляет команды-алиасы: keentools, kt, keenkit.
 
 set -e
 
-# ---------------------------------------------------------------------------
-# Репозиторий проекта на GitHub (используется, если скрипт запущен не из
-# локальной копии, а как "curl ... | sh")
-# ---------------------------------------------------------------------------
 KT_GITHUB_OWNER="phenomenonRT"
 KT_GITHUB_REPO="keentools"
 KT_GITHUB_BRANCH="main"
@@ -29,9 +26,6 @@ echo " Установка KeenTools"
 echo "================================"
 echo
 
-# ---------------------------------------------------------------------------
-# Определяем режим: локальная копия рядом со скриптом или запуск "по ссылке"
-# ---------------------------------------------------------------------------
 CALLER_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd || pwd)
 
 if [ -f "$CALLER_DIR/keentools.sh" ] && [ -d "$CALLER_DIR/lib" ]; then
@@ -44,18 +38,32 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Проверка Entware
+# Выбор источника установки (только для remote-режима: скачивания архива)
 # ---------------------------------------------------------------------------
-# if [ ! -x /opt/bin/opkg ] && ! command -v opkg >/dev/null 2>&1; then
-#     echo "[✘] Entware/opkg не найден."
-#     echo "    Сначала установите Entware: https://help.keenetic.com/hc/ru/articles/360021214160"
-#     exit 1
-# fi
-# echo "[✔] Entware найден"
+KT_MIRRORS=""
+if [ "$MODE" = "remote" ]; then
+    echo
+    echo "Источник установки:"
+    echo "  1) GitHub (по умолчанию)"
+    echo "  2) Своё зеркало / прокси"
+    printf "Выбор [1]: "
+    read -r src_choice
+    if [ "$src_choice" = "2" ]; then
+        printf "Введите базовый URL зеркала (например https://ghproxy.com): "
+        read -r mirror_url
+        mirror_url="${mirror_url%/}"
+        if [ -n "$mirror_url" ]; then
+            KT_GITHUB_ARCHIVE_URL="${mirror_url}/${KT_GITHUB_OWNER}/${KT_GITHUB_REPO}/archive/refs/heads/${KT_GITHUB_BRANCH}.tar.gz"
+            KT_MIRRORS="$mirror_url"
+            echo "[i] Буду качать через зеркало: $mirror_url"
+        else
+            echo "[i] Зеркало не указано — использую GitHub"
+        fi
+    fi
+fi
 
 # ---------------------------------------------------------------------------
-# Зависимости: curl нужен и для скачивания архива (в remote-режиме),
-# и самому менеджеру (проверка обновлений и т.д.); jq — для чтения info.json
+# Зависимости
 # ---------------------------------------------------------------------------
 missing=""
 for dep in curl jq; do
@@ -84,7 +92,7 @@ fi
 echo "[✔] Зависимости на месте (curl, jq)"
 
 # ---------------------------------------------------------------------------
-# Remote-режим: скачиваем архив ветки с GitHub и распаковываем во временную папку
+# Remote-режим: скачиваем архив ветки (GitHub либо выбранное зеркало)
 # ---------------------------------------------------------------------------
 if [ "$MODE" = "remote" ]; then
     tmp_dir=$(mktemp -d 2>/dev/null || echo "/tmp/keentools_install.$$")
@@ -93,9 +101,19 @@ if [ "$MODE" = "remote" ]; then
 
     echo "[i] Скачивание $KT_GITHUB_ARCHIVE_URL ..."
     if ! curl -fsSL -o "$archive" "$KT_GITHUB_ARCHIVE_URL"; then
-        echo "[✘] Не удалось скачать архив репозитория"
-        rm -rf "$tmp_dir"
-        exit 1
+        echo "[✘] Не удалось скачать архив с выбранного источника"
+        if [ -n "$KT_MIRRORS" ]; then
+            echo "[i] Пробую напрямую с GitHub как резервный вариант..."
+            fallback_url="https://github.com/${KT_GITHUB_OWNER}/${KT_GITHUB_REPO}/archive/refs/heads/${KT_GITHUB_BRANCH}.tar.gz"
+            if ! curl -fsSL -o "$archive" "$fallback_url"; then
+                echo "[✘] GitHub тоже недоступен"
+                rm -rf "$tmp_dir"
+                exit 1
+            fi
+        else
+            rm -rf "$tmp_dir"
+            exit 1
+        fi
     fi
 
     echo "[i] Распаковка..."
@@ -105,7 +123,6 @@ if [ "$MODE" = "remote" ]; then
         exit 1
     fi
 
-    # Архив GitHub всегда содержит ровно одну папку вида <repo>-<branch>
     extracted_dir=$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n1)
     if [ -z "$extracted_dir" ] || [ ! -f "$extracted_dir/keentools.sh" ]; then
         echo "[✘] Неожиданная структура архива — не нашёл keentools.sh"
@@ -118,7 +135,7 @@ if [ "$MODE" = "remote" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Копирование файлов в целевую директорию
+# Копирование файлов
 # ---------------------------------------------------------------------------
 if [ -d "$TARGET" ] && [ "$SRC_DIR" != "$TARGET" ]; then
     echo "[i] Найдена существующая установка в $TARGET — обновляю файлы (state/config сохранятся)"
@@ -130,35 +147,41 @@ cp -a "$SRC_DIR/." "$TARGET/" 2>/dev/null || true
 chmod +x "$TARGET/keentools.sh"
 find "$TARGET" -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 
+# Сохраняем выбранное зеркало в настройки, чтобы им пользовалось и самообновление
+if [ -n "$KT_MIRRORS" ]; then
+    mkdir -p "$TARGET/config"
+    if [ -f "$TARGET/config/settings.conf" ] && grep -q "^KT_GITHUB_MIRRORS=" "$TARGET/config/settings.conf" 2>/dev/null; then
+        tmp_cfg="$TARGET/config/settings.conf.tmp"
+        awk -F'=' -v v="$KT_MIRRORS" 'BEGIN{OFS="="} $1=="KT_GITHUB_MIRRORS"{$0="KT_GITHUB_MIRRORS="v} {print}' \
+            "$TARGET/config/settings.conf" > "$tmp_cfg" && mv "$tmp_cfg" "$TARGET/config/settings.conf"
+    fi
+fi
+
 echo "[✔] Файлы установлены в $TARGET"
 
-# ---------------------------------------------------------------------------
-# Уборка временных файлов (remote-режим)
-# ---------------------------------------------------------------------------
 if [ "$MODE" = "remote" ]; then
     rm -rf "$tmp_dir"
 fi
 
 # ---------------------------------------------------------------------------
-# Короткая команда запуска
+# Команды запуска: keentools, kt (короткий алиас), keenkit (алиас на
+# случай, если удобнее ассоциировать команду не с "инструментами", а с
+# "набором" проектов — оба указывают на один и тот же keentools.sh)
 # ---------------------------------------------------------------------------
-# ВАЖНО: делаем именно обёрточный скрипт с абсолютным путём, а не симлинк.
-# keentools.sh вычисляет свою директорию через dirname "$0", а dirname не
-# разворачивает символические ссылки — при вызове через симлинк /opt/bin/keentools
-# скрипт получил бы "$0"=/opt/bin/keentools и искал бы lib/ в /opt/bin/lib,
-# которого не существует.
 if [ -d /opt/bin ]; then
-    cat > /opt/bin/keentools << EOF
+    for cmd in keentools kt keenkit; do
+        cat > "/opt/bin/$cmd" << EOF
 #!/bin/sh
 exec sh "$TARGET/keentools.sh" "\$@"
 EOF
-    chmod +x /opt/bin/keentools
-    echo "[✔] Добавлена команда: keentools"
+        chmod +x "/opt/bin/$cmd"
+    done
+    echo "[✔] Добавлены команды: keentools, kt, keenkit"
 else
     echo "[i] /opt/bin не найден — запускайте так: sh $TARGET/keentools.sh"
 fi
 
 echo
-echo "Готово! Запустите менеджер командой:"
-echo "  keentools"
+echo "Готово! Запустите менеджер любой из команд:"
+echo "  keentools   /   kt   /   keenkit"
 echo "(или: sh $TARGET/keentools.sh)"

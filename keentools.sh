@@ -5,8 +5,6 @@
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
-# Если keentools.sh вызван через символическую ссылку (dirname "$0" не
-# разворачивает симлинки), находим настоящее расположение файла.
 kt_src="$0"
 while [ -h "$kt_src" ]; do
     kt_link=$(readlink "$kt_src")
@@ -32,9 +30,6 @@ export KT_HOME
 kt_init_dirs
 kt_config_ensure
 
-# ---------------------------------------------------------------------------
-# Вспомогательное: получить N-ый позиционный аргумент
-# ---------------------------------------------------------------------------
 kt_nth() {
     n="$1"; shift
     i=1
@@ -92,50 +87,85 @@ kt_menu_catalog() {
 }
 
 # ---------------------------------------------------------------------------
-# Меню конкретного установленного модуля
+# Меню конкретного установленного модуля.
+#
+# Если у модуля есть свой menu.sh — управление полностью передаётся ему
+# (он получает те же KT_HOME/KT_MODULE_DIR в окружении и может рисовать
+# что угодно). Если menu.sh нет — используется стандартное меню, но
+# пункты для отсутствующих скриптов (restart.sh/configure.sh/log.sh/...)
+# просто не показываются, вместо "заглушки с предупреждением".
 # ---------------------------------------------------------------------------
 kt_menu_module() {
     name="$1"
+
+    if kt_module_has_script "$name" menu.sh; then
+        kt_module_run "$name" menu.sh
+        return
+    fi
+
     while true; do
         clear 2>/dev/null
         kt_header "$(kt_module_name "$name")"
         echo "Статус:  $(kt_module_status_text "$name")"
         echo "Версия:  $(kt_module_installed_version "$name")"
         echo
-        echo "1. Запустить"
-        echo "2. Остановить"
-        echo "3. Перезапустить"
-        echo "4. Обновить"
-        echo "5. Настроить"
-        echo "6. Посмотреть лог"
-        echo "7. Удалить"
+
+        # Пункты меню собираются динамически: показываем только то, что
+        # у модуля реально есть (start.sh считается обязательным всегда).
+        n=0
+        set --
+        add_item() {
+            n=$((n+1))
+            eval "kt_item_${n}_label=\"\$1\""
+            eval "kt_item_${n}_script=\"\$2\""
+        }
+
+        add_item "Запустить"        "start.sh"
+        add_item "Остановить"       "stop.sh"
+        kt_module_has_script "$name" restart.sh   && add_item "Перезапустить"     "restart.sh"
+        kt_module_has_script "$name" update.sh    && add_item "Обновить"          "update.sh"
+        kt_module_has_script "$name" configure.sh && add_item "Настроить"         "configure.sh"
+        if kt_module_has_script "$name" log.sh || [ -f "$(kt_module_dir "$name")/logs/${name}.log" ]; then
+            add_item "Посмотреть лог" "__log__"
+        fi
+        add_item "Удалить" "__uninstall__"
+
+        i=1
+        while [ "$i" -le "$n" ]; do
+            eval "lbl=\"\$kt_item_${i}_label\""
+            echo "$i. $lbl"
+            i=$((i+1))
+        done
         echo
         echo "0. Назад"
         echo
         printf "Выбор: "
         read -r c
+
         case "$c" in
-            1) kt_module_start "$name"; kt_pause ;;
-            2) kt_module_stop "$name"; kt_pause ;;
-            3) kt_module_restart "$name"; kt_pause ;;
-            4) kt_module_update "$name"; kt_pause ;;
-            5)
-                if [ -f "$(kt_module_dir "$name")/configure.sh" ]; then
-                    kt_module_run "$name" configure.sh
-                else
-                    kt_warn "У модуля нет отдельной настройки (configure.sh)"
-                fi
-                kt_pause
-                ;;
-            6) kt_menu_module_log "$name" ;;
-            7)
-                if kt_confirm "Точно удалить $(kt_module_name "$name")?"; then
-                    kt_module_uninstall "$name"
-                    kt_pause
-                    return
-                fi
-                ;;
             0) return ;;
+            [0-9]*)
+                if [ "$c" -ge 1 ] 2>/dev/null && [ "$c" -le "$n" ] 2>/dev/null; then
+                    eval "scr=\"\$kt_item_${c}_script\""
+                    case "$scr" in
+                        start.sh)   kt_module_start "$name"; kt_pause ;;
+                        stop.sh)    kt_module_stop "$name"; kt_pause ;;
+                        restart.sh) kt_module_restart "$name"; kt_pause ;;
+                        update.sh)  kt_module_update "$name"; kt_pause ;;
+                        configure.sh) kt_module_run "$name" configure.sh; kt_pause ;;
+                        __log__)    kt_menu_module_log "$name" ;;
+                        __uninstall__)
+                            if kt_confirm "Точно удалить $(kt_module_name "$name")?"; then
+                                kt_module_uninstall "$name"
+                                kt_pause
+                                return
+                            fi
+                            ;;
+                    esac
+                else
+                    kt_warn "Неверный выбор"
+                fi
+                ;;
             *) kt_warn "Неверный выбор" ;;
         esac
     done
@@ -163,14 +193,20 @@ kt_menu_settings() {
     while true; do
         clear 2>/dev/null
         kt_header "Настройки"
-        echo "1. Проверять обновления при запуске:   $(kt_config_get KT_CHECK_ON_START)"
-        echo "2. Периодичность проверки:              $(kt_config_get KT_CHECK_FREQUENCY)"
-        echo "3. Проверять обновления проектов:        $(kt_config_get KT_CHECK_MODULE_UPDATES)"
-        echo "4. Проверять обновления менеджера:        $(kt_config_get KT_CHECK_SELF_UPDATES)"
-        echo "5. URL репозитория для самообновления:    $(kt_config_get KT_REPO_URL)"
-        echo "6. Отключить цветной вывод:               $(kt_config_get KT_NO_COLOR)"
+        paused_note=""
+        kt_updates_are_paused && paused_note=" ${C_YELLOW}(на паузе)${C_RESET}"
+        echo " 1. Проверять обновления при запуске:   $(kt_config_get KT_CHECK_ON_START)$paused_note"
+        echo " 2. Периодичность проверки:              $(kt_config_get KT_CHECK_FREQUENCY)"
+        echo " 3. Проверять обновления проектов:        $(kt_config_get KT_CHECK_MODULE_UPDATES)"
+        echo " 4. Проверять обновления менеджера:        $(kt_config_get KT_CHECK_SELF_UPDATES)"
+        echo " 5. URL репозитория для самообновления:    $(kt_config_get KT_REPO_URL)"
+        echo " 6. Отключить цветной вывод:               $(kt_config_get KT_NO_COLOR)"
+        echo " 7. Тихая/быстрая проверка обновлений:     $(kt_config_get KT_CHECK_QUIET)"
+        echo " 8. Источник установки:                    $(kt_config_get KT_INSTALL_SOURCE)"
+        echo " 9. Зеркала GitHub (через запятую):        $(kt_config_get KT_GITHUB_MIRRORS)"
+        echo "10. Приостановить проверку обновлений"
         echo
-        echo "0. Назад"
+        echo " 0. Назад"
         echo
         printf "Выбор: "
         read -r c
@@ -206,6 +242,32 @@ kt_menu_settings() {
                 cur=$(kt_config_get KT_NO_COLOR)
                 [ "$cur" = "1" ] && kt_config_set KT_NO_COLOR 0 || kt_config_set KT_NO_COLOR 1
                 kt_warn "Изменение вступит в силу при следующем запуске"
+                ;;
+            7)
+                cur=$(kt_config_get KT_CHECK_QUIET)
+                [ "$cur" = "yes" ] && kt_config_set KT_CHECK_QUIET no || kt_config_set KT_CHECK_QUIET yes
+                ;;
+            8)
+                echo "1) github  2) mirror"
+                printf "Выбор: "; read -r s
+                case "$s" in
+                    1) kt_config_set KT_INSTALL_SOURCE github ;;
+                    2) kt_config_set KT_INSTALL_SOURCE mirror ;;
+                esac
+                ;;
+            9)
+                printf "Зеркала через запятую (пусто чтобы очистить): "
+                read -r mirrors
+                kt_config_set KT_GITHUB_MIRRORS "$mirrors"
+                ;;
+            10)
+                printf "На сколько дней приостановить проверку обновлений (0 = снять паузу): "
+                read -r d
+                case "$d" in
+                    ''|*[!0-9]*) kt_warn "Введите число" ;;
+                    *) kt_pause_updates "$d" ;;
+                esac
+                kt_pause
                 ;;
             0) return ;;
             *) kt_warn "Неверный выбор" ;;
@@ -310,11 +372,14 @@ kt_first_run() {
 # Главное меню
 # ---------------------------------------------------------------------------
 kt_menu_main() {
-    # Автопроверка обновлений при запуске (согласно настройкам/частоте)
+    # Автопроверка обновлений при запуске (согласно настройкам/частоте/паузе).
+    # В "тихом" режиме (по умолчанию) это быстро: модули проверяются
+    # параллельно, печатается только сводка при наличии обновлений.
     if kt_should_autocheck; then
-        kt_check_all_updates
+        if kt_check_all_updates; then
+            kt_pause
+        fi
         kt_mark_checked_now
-        kt_pause
     fi
 
     while true; do

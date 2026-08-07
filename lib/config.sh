@@ -30,6 +30,23 @@ KT_NO_COLOR=0
 
 # Отметка времени последней проверки обновлений (unix timestamp)
 KT_LAST_CHECK_TS=0
+
+# Пауза автопроверки обновлений до этой unix-метки времени (0 = не на паузе).
+# Ставится через меню "Настройки → Приостановить проверку обновлений".
+KT_CHECK_PAUSED_UNTIL=0
+
+# Тихий/быстрый режим проверки обновлений: yes = не печатать построчно
+# статус каждого модуля, только итоговую сводку (и запускать проверки
+# модулей параллельно, а не последовательно)
+KT_CHECK_QUIET=yes
+
+# Источник установки/обновления: github | mirror
+KT_INSTALL_SOURCE=github
+
+# Список зеркал GitHub через запятую (raw/codeload-совместимые прокси),
+# используется как fallback, если основной GitHub недоступен.
+# Пример: https://ghproxy.com,https://mirror.ghproxy.com
+KT_GITHUB_MIRRORS=
 EOF
     fi
 }
@@ -56,11 +73,37 @@ kt_config_set() {
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Пауза автопроверки обновлений на N дней (0 = снять паузу немедленно)
+# ---------------------------------------------------------------------------
+kt_pause_updates() {
+    days="$1"
+    if [ "$days" -le 0 ] 2>/dev/null; then
+        kt_config_set KT_CHECK_PAUSED_UNTIL 0
+        kt_ok "Пауза проверки обновлений снята"
+        return 0
+    fi
+    until_ts=$(( $(date +%s) + days*86400 ))
+    kt_config_set KT_CHECK_PAUSED_UNTIL "$until_ts"
+    kt_ok "Проверка обновлений приостановлена на $days дн. (до $(date -d "@$until_ts" '+%Y-%m-%d' 2>/dev/null || echo "$until_ts"))"
+}
+
+kt_updates_are_paused() {
+    until_ts=$(kt_config_get KT_CHECK_PAUSED_UNTIL)
+    [ -z "$until_ts" ] && until_ts=0
+    [ "$until_ts" -gt 0 ] 2>/dev/null || return 1
+    now=$(date +%s)
+    [ "$now" -lt "$until_ts" ]
+}
+
 # Нужно ли сейчас автоматически проверять обновления, согласно частоте
 kt_should_autocheck() {
     kt_config_ensure
     on=$(kt_config_get KT_CHECK_ON_START)
     [ "$on" = "yes" ] || return 1
+
+    # Временная пауза (см. kt_pause_updates) имеет приоритет над частотой
+    kt_updates_are_paused && return 1
 
     freq=$(kt_config_get KT_CHECK_FREQUENCY)
     now=$(date +%s)

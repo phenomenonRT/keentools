@@ -2,19 +2,49 @@
 # update.sh — безопасное обновление KeenTools и модулей.
 #
 # По умолчанию менеджер обновляет сам себя прямо из GitHub-репозитория
-# проекта (см. KT_GITHUB_* в lib/common.sh) — отдельно хостить релизы
-# не нужно:
-#   <KT_GITHUB_RAW_BASE>/VERSION        — версия в репозитории
-#   <KT_GITHUB_RAW_BASE>/CHANGELOG.txt  — список изменений (опционально)
-#   <KT_GITHUB_ARCHIVE_URL>             — архив ветки целиком (codeload)
-#
-# Если в settings.conf указан свой KT_REPO_URL — используется он вместо
-# GitHub для проверки VERSION/CHANGELOG.txt (например, для приватного
-# зеркала), но сам архив всё равно берётся с GitHub, так как раздать
-# архив всего репозитория через "сырые" файлы нельзя.
-#
-# Для модулей используется поле "update_url" в info.json, указывающее
-# на аналогичный remote info.json с актуальной версией.
+# проекта (см. KT_GITHUB_* в lib/common.sh). Если задан KT_REPO_URL —
+# используется он вместо GitHub для проверки VERSION/CHANGELOG.txt.
+# Если основной GitHub недоступен, используются зеркала из
+# KT_GITHUB_MIRRORS (settings.conf), по одному, пока одно не ответит.
+
+# ---------------------------------------------------------------------------
+# Зеркала: пробуем базовый URL, при неудаче — зеркала по очереди
+# kt_fetch_with_mirrors <path-relative-to-raw-base> [max-time]
+# echo содержимое, код возврата 0 при успехе
+# ---------------------------------------------------------------------------
+kt_mirror_list() {
+    cfg=$(kt_config_get KT_GITHUB_MIRRORS)
+    [ -n "$cfg" ] && echo "$cfg" | tr ',' '\n'
+}
+
+kt_fetch_with_mirrors() {
+    rel_path="$1"; max_time="${2:-5}"
+    base=$(kt_self_repo_base)
+    out=$(curl -fsSL --max-time "$max_time" "$base/$rel_path" 2>/dev/null)
+    if [ -n "$out" ]; then echo "$out"; return 0; fi
+
+    for m in $(kt_mirror_list); do
+        m="${m%/}"
+        out=$(curl -fsSL --max-time "$max_time" "$m/$KT_GITHUB_OWNER/$KT_GITHUB_REPO/$KT_GITHUB_BRANCH/$rel_path" 2>/dev/null)
+        [ -n "$out" ] && { echo "$out"; return 0; }
+    done
+    return 1
+}
+
+# Архив репозитория с fallback на зеркала
+kt_download_archive_with_mirrors() {
+    dest="$1"; max_time="${2:-60}"
+    if curl -fsSL --max-time "$max_time" -o "$dest" "$KT_GITHUB_ARCHIVE_URL" 2>/dev/null && [ -s "$dest" ]; then
+        return 0
+    fi
+    for m in $(kt_mirror_list); do
+        m="${m%/}"
+        if curl -fsSL --max-time "$max_time" -o "$dest" "$m/$KT_GITHUB_OWNER/$KT_GITHUB_REPO/archive/refs/heads/$KT_GITHUB_BRANCH.tar.gz" 2>/dev/null && [ -s "$dest" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
 
 # ---------------------------------------------------------------------------
 # Обновление самого менеджера
@@ -31,9 +61,8 @@ kt_self_repo_base() {
 }
 
 kt_self_check_update() {
-    base=$(kt_self_repo_base)
-    remote_ver=$(curl -fsSL --max-time 5 "$base/VERSION" 2>/dev/null | tr -d '[:space:]')
-    [ -z "$remote_ver" ] && { kt_warn "Не удалось получить версию из репозитория ($base)"; return 1; }
+    remote_ver=$(kt_fetch_with_mirrors "VERSION" 5 | tr -d '[:space:]')
+    [ -z "$remote_ver" ] && { kt_warn "Не удалось получить версию из репозитория (проверьте KT_REPO_URL/зеркала)"; return 1; }
 
     local_ver=$(kt_self_current_version)
     if kt_version_gt "$remote_ver" "$local_ver"; then
@@ -44,7 +73,6 @@ kt_self_check_update() {
 }
 
 kt_self_update() {
-    base=$(kt_self_repo_base)
     remote_ver="$1"
 
     kt_header "Обновление KeenTools"
@@ -52,7 +80,7 @@ kt_self_update() {
     echo "Новая версия:    $remote_ver"
     echo
 
-    changelog=$(curl -fsSL --max-time 5 "$base/CHANGELOG.txt" 2>/dev/null)
+    changelog=$(kt_fetch_with_mirrors "CHANGELOG.txt" 5)
     if [ -n "$changelog" ]; then
         echo "Список изменений:"
         echo "$changelog"
@@ -67,15 +95,12 @@ kt_self_update() {
 
     kt_info "1/5 Проверка доступности новой версии... OK"
 
-    kt_info "2/5 Загрузка архива репозитория ($KT_GITHUB_BRANCH) с GitHub..."
-    if ! curl -fsSL --max-time 60 -o "$archive" "$KT_GITHUB_ARCHIVE_URL"; then
-        kt_err "Ошибка загрузки $KT_GITHUB_ARCHIVE_URL"
+    kt_info "2/5 Загрузка архива репозитория ($KT_GITHUB_BRANCH)..."
+    if ! kt_download_archive_with_mirrors "$archive" 60; then
+        kt_err "Ошибка загрузки архива (GitHub и все зеркала недоступны)"
         rm -rf "$tmp_dir"
         return 1
     fi
-    # GitHub codeload отдаёт архив по HTTPS без отдельной контрольной суммы —
-    # целостность обеспечивается самим TLS-соединением к github.com,
-    # аналогично тому, как устанавливается сам install.sh через curl|sh.
 
     kt_info "3/5 Резервное копирование текущей версии..."
     backup_file=$(kt_backup_create)
@@ -88,7 +113,6 @@ kt_self_update() {
         return 1
     fi
 
-    # GitHub-архив всегда содержит ровно одну папку вида <repo>-<branch>
     extracted_dir=$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n1)
     if [ -z "$extracted_dir" ] || [ ! -f "$extracted_dir/keentools.sh" ]; then
         kt_err "Неожиданная структура архива. Восстанавливаю предыдущую версию..."
@@ -116,7 +140,6 @@ kt_self_update() {
 # Обновление модулей
 # ---------------------------------------------------------------------------
 kt_module_check_update() {
-    # echo новую версию, если она есть; иначе ничего не выводит и код возврата 1
     name="$1"
     url=$(kt_module_update_url "$name")
     [ -z "$url" ] && return 1
@@ -135,20 +158,23 @@ kt_module_check_update() {
     return 1
 }
 
-# Проверяет все установленные модули, печатает сводку, возвращает
-# список модулей с обновлениями (по одному в строке) через глобальную переменную
+# Проверяет все установленные модули + себя. По умолчанию — "тихий/быстрый"
+# режим (KT_CHECK_QUIET=yes): проверки модулей запускаются параллельно в
+# фоне, печатается только итоговая сводка (что реально есть обновления).
 kt_updates_available_list=""
 
 kt_check_all_updates() {
     kt_header "Проверка обновлений"
     kt_updates_available_list=""
     found_any=0
+    quiet=$(kt_config_get KT_CHECK_QUIET)
+    [ "$quiet" != "no" ] && quiet=yes
 
     check_self=$(kt_config_get KT_CHECK_SELF_UPDATES)
     check_mods=$(kt_config_get KT_CHECK_MODULE_UPDATES)
 
     if [ "$check_self" != "no" ]; then
-        self_new=$(kt_self_check_update)
+        self_new=$(kt_self_check_update 2>/dev/null)
         if [ -n "$self_new" ]; then
             printf "%b\342\234\224%b KeenTools %s \342\206\222 %s\n" "$C_GREEN" "$C_RESET" "$(kt_self_current_version)" "$self_new"
             found_any=1
@@ -156,17 +182,44 @@ kt_check_all_updates() {
     fi
 
     if [ "$check_mods" != "no" ]; then
-        for name in $(kt_module_list_installed); do
-            new_ver=$(kt_module_check_update "$name")
-            if [ -n "$new_ver" ]; then
-                cur=$(kt_module_installed_version "$name")
-                printf "%b\342\234\224%b %s %s \342\206\222 %s\n" "$C_GREEN" "$C_RESET" "$(kt_module_name "$name")" "$cur" "$new_ver"
-                kt_updates_available_list="$kt_updates_available_list $name"
-                found_any=1
-            else
-                printf "%b\342\200\224%b %s \342\200\224 актуальная версия\n" "$C_GRAY" "$C_RESET" "$(kt_module_name "$name")"
-            fi
-        done
+        tmp_dir=$(mktemp -d 2>/dev/null || echo "/tmp/kt_check.$$")
+        mkdir -p "$tmp_dir"
+        names=$(kt_module_list_installed)
+
+        if [ "$quiet" = "yes" ]; then
+            # Быстрый режим: проверяем модули параллельно в фоне
+            for name in $names; do
+                (
+                    new_ver=$(kt_module_check_update "$name")
+                    [ -n "$new_ver" ] && echo "$name|$new_ver" > "$tmp_dir/$name.result"
+                ) &
+            done
+            wait
+            for name in $names; do
+                res="$tmp_dir/$name.result"
+                if [ -f "$res" ]; then
+                    new_ver=$(cut -d'|' -f2 "$res")
+                    cur=$(kt_module_installed_version "$name")
+                    printf "%b\342\234\224%b %s %s \342\206\222 %s\n" "$C_GREEN" "$C_RESET" "$(kt_module_name "$name")" "$cur" "$new_ver"
+                    kt_updates_available_list="$kt_updates_available_list $name"
+                    found_any=1
+                fi
+            done
+            rm -rf "$tmp_dir"
+        else
+            # Подробный режим: последовательно, с построчным выводом
+            for name in $names; do
+                new_ver=$(kt_module_check_update "$name")
+                if [ -n "$new_ver" ]; then
+                    cur=$(kt_module_installed_version "$name")
+                    printf "%b\342\234\224%b %s %s \342\206\222 %s\n" "$C_GREEN" "$C_RESET" "$(kt_module_name "$name")" "$cur" "$new_ver"
+                    kt_updates_available_list="$kt_updates_available_list $name"
+                    found_any=1
+                else
+                    printf "%b\342\200\224%b %s \342\200\224 актуальная версия\n" "$C_GRAY" "$C_RESET" "$(kt_module_name "$name")"
+                fi
+            done
+        fi
     fi
 
     if [ "$found_any" = "0" ]; then
