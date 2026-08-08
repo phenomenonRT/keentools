@@ -176,7 +176,7 @@ kt_self_update() {
     find "$KT_HOME" -name "*.sh" -exec chmod +x {} \; 2>/dev/null
 
     if [ -d /opt/bin ]; then
-        for cmd in keentools kt keenkit; do
+        for cmd in keentools kt; do
             rm -f "/opt/bin/$cmd"
             cat > "/opt/bin/$cmd" << EOF
 #!/bin/sh
