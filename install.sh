@@ -161,10 +161,11 @@ kt_verify_source_keentools_sh() {
     f="$1"
     [ -f "$f" ] || return 1
     grep -q 'kt_menu_main()' "$f" 2>/dev/null || return 1
-    grep -E -q '^[[:space:]]*kt_menu_main([[:space:]]|$)' "$f" 2>/dev/null || return 1
-    # Исходник не должен быть просто однострочной обёрткой exec
+    if grep -q 'KT_WRAPPER_ACTIVE' "$f" 2>/dev/null; then
+        return 1
+    fi
     lines=$(wc -l < "$f" 2>/dev/null || echo 0)
-    [ "$lines" -gt 20 ] 2>/dev/null || return 1
+    [ "$lines" -gt 50 ] 2>/dev/null || return 1
     return 0
 }
 
@@ -183,10 +184,22 @@ if [ -d "$TARGET" ] && [ "$SRC_DIR" != "$TARGET" ]; then
 fi
 
 mkdir -p "$TARGET"
-if [ -L "$TARGET/keentools.sh" ]; then
-    rm -f "$TARGET/keentools.sh"
+rm -f "$TARGET/keentools.sh"
+
+if ! cp -a "$SRC_DIR"/* "$TARGET/" 2>/dev/null; then
+    if ! cp -r "$SRC_DIR"/* "$TARGET/"; then
+        echo "[✘] Ошибка копирования файлов в $TARGET"
+        [ "$MODE" = "remote" ] && rm -rf "$tmp_dir"
+        exit 1
+    fi
 fi
-cp -a "$SRC_DIR/." "$TARGET/" 2>/dev/null || true
+
+for f in "$SRC_DIR"/.*; do
+    case "$f" in
+        */. | */..) continue ;;
+        *) [ -e "$f" ] && cp -a "$f" "$TARGET/" 2>/dev/null || true ;;
+    esac
+done
 
 chmod +x "$TARGET/keentools.sh"
 find "$TARGET" -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true

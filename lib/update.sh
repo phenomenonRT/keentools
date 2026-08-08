@@ -57,9 +57,11 @@ kt_verify_keentools_sh() {
     f="$1"
     [ -f "$f" ] || return 1
     grep -q 'kt_menu_main()' "$f" 2>/dev/null || return 1
-    grep -E -q '^[[:space:]]*kt_menu_main([[:space:]]|$)' "$f" 2>/dev/null || return 1
+    if grep -q 'KT_WRAPPER_ACTIVE' "$f" 2>/dev/null; then
+        return 1
+    fi
     lines=$(wc -l < "$f" 2>/dev/null || echo 0)
-    [ "$lines" -gt 20 ] 2>/dev/null || return 1
+    [ "$lines" -gt 50 ] 2>/dev/null || return 1
     return 0
 }
 
@@ -153,16 +155,23 @@ kt_self_update() {
         return 1
     fi
 
-    if [ -L "$KT_HOME/keentools.sh" ]; then
-        rm -f "$KT_HOME/keentools.sh"
+    rm -f "$KT_HOME/keentools.sh"
+
+    if ! cp -a "$extracted_dir"/* "$KT_HOME/" 2>/dev/null; then
+        if ! cp -r "$extracted_dir"/* "$KT_HOME/" 2>/dev/null; then
+            kt_err "Ошибка копирования файлов. Восстанавливаю предыдущую версию..."
+            [ -n "$backup_file" ] && kt_backup_restore "$backup_file"
+            rm -rf "$tmp_dir"
+            return 1
+        fi
     fi
 
-    if ! cp -a "$extracted_dir/." "$KT_HOME/" 2>/dev/null; then
-        kt_err "Ошибка копирования файлов. Восстанавливаю предыдущую версию..."
-        [ -n "$backup_file" ] && kt_backup_restore "$backup_file"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
+    for f in "$extracted_dir"/.*; do
+        case "$f" in
+            */. | */..) continue ;;
+            *) [ -e "$f" ] && cp -a "$f" "$KT_HOME/" 2>/dev/null || true ;;
+        esac
+    done
 
     find "$KT_HOME" -name "*.sh" -exec chmod +x {} \; 2>/dev/null
 
