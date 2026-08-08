@@ -21,25 +21,6 @@ KT_GITHUB_ARCHIVE_URL="https://github.com/${KT_GITHUB_OWNER}/${KT_GITHUB_REPO}/a
 
 TARGET="/opt/etc/keentools"
 
-# ---------------------------------------------------------------------------
-# При запуске через "curl ... | sh" stdin самого sh — это уже байты
-# скрипта, а не терминал пользователя. Обычный "read" в этом случае
-# читает не ввод с клавиатуры, а хвост самого скрипта, что портит его
-# дальнейший разбор ("unexpected done" и т.п.). Поэтому весь интерактивный
-# ввод читаем напрямую из /dev/tty; если tty недоступен (неинтерактивный
-# запуск, cron, CI) — используем безопасное значение по умолчанию.
-# kt_read_tty <var_name> <default_value>
-# ---------------------------------------------------------------------------
-kt_read_tty() {
-    var_name="$1"; default_val="$2"
-    if [ -e /dev/tty ]; then
-        read -r "$var_name" < /dev/tty
-    else
-        echo "[i] Нет доступного терминала — использую значение по умолчанию: $default_val"
-        eval "$var_name=\"\$default_val\""
-    fi
-}
-
 echo "================================"
 echo " Установка KeenTools"
 echo "================================"
@@ -66,10 +47,10 @@ if [ "$MODE" = "remote" ]; then
     echo "  1) GitHub (по умолчанию)"
     echo "  2) Своё зеркало / прокси"
     printf "Выбор [1]: "
-    kt_read_tty src_choice "1"
+    read -r src_choice
     if [ "$src_choice" = "2" ]; then
         printf "Введите базовый URL зеркала (например https://ghproxy.com): "
-        kt_read_tty mirror_url ""
+        read -r mirror_url
         mirror_url="${mirror_url%/}"
         if [ -n "$mirror_url" ]; then
             KT_GITHUB_ARCHIVE_URL="${mirror_url}/${KT_GITHUB_OWNER}/${KT_GITHUB_REPO}/archive/refs/heads/${KT_GITHUB_BRANCH}.tar.gz"
@@ -94,7 +75,7 @@ done
 if [ -n "$missing" ]; then
     echo "Не найдены пакеты:$missing"
     printf "Установить сейчас через opkg? [Y/N]: "
-    kt_read_tty ans "Y"
+    read -r ans
     case "$ans" in
         [Yy]*)
             opkg update
@@ -154,6 +135,31 @@ if [ "$MODE" = "remote" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# NEW: проверка целостности исходника ПЕРЕД копированием поверх установки.
+# Защищает от ситуации, когда keentools.sh в источнике битый, усечённый
+# или (по ошибке/багу где-то в цепочке) содержит не сам менеджер, а,
+# например, текст скрипта-обёртки. Признак настоящего файла — наличие
+# определения главной функции меню.
+# ---------------------------------------------------------------------------
+kt_verify_source_keentools_sh() {
+    f="$1"
+    [ -f "$f" ] || return 1
+    grep -q 'kt_menu_main()' "$f" 2>/dev/null || return 1
+    grep -q 'kt_menu_main$' "$f" 2>/dev/null || return 1
+    # Исходник не должен быть просто однострочной обёрткой exec
+    lines=$(wc -l < "$f" 2>/dev/null || echo 0)
+    [ "$lines" -gt 20 ] 2>/dev/null || return 1
+    return 0
+}
+
+if ! kt_verify_source_keentools_sh "$SRC_DIR/keentools.sh"; then
+    echo "[✘] keentools.sh в источнике выглядит повреждённым или неполным — установка остановлена,"
+    echo "    чтобы не испортить рабочую копию. Ничего не менялось."
+    [ "$MODE" = "remote" ] && rm -rf "$tmp_dir"
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # Копирование файлов
 # ---------------------------------------------------------------------------
 if [ -d "$TARGET" ] && [ "$SRC_DIR" != "$TARGET" ]; then
@@ -165,6 +171,21 @@ cp -a "$SRC_DIR/." "$TARGET/" 2>/dev/null || true
 
 chmod +x "$TARGET/keentools.sh"
 find "$TARGET" -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# NEW: проверка целостности ПОСЛЕ копирования — на случай, если что-то
+# пошло не так уже на этапе cp (диск, права, гонка с другим процессом).
+# Если файл в итоге не тот — явно сообщаем, а не оставляем тихо висящую
+# команду keentools/kt.
+# ---------------------------------------------------------------------------
+if ! kt_verify_source_keentools_sh "$TARGET/keentools.sh"; then
+    echo "[✘] После копирования файл $TARGET/keentools.sh не прошёл проверку целостности."
+    echo "    Установка НЕ завершена корректно. Не запускайте keentools/kt в этом состоянии."
+    echo "    Повторите установку заново:"
+    echo "      curl -fsSL https://raw.githubusercontent.com/${KT_GITHUB_OWNER}/${KT_GITHUB_REPO}/refs/heads/${KT_GITHUB_BRANCH}/install.sh | sh"
+    [ "$MODE" = "remote" ] && rm -rf "$tmp_dir"
+    exit 1
+fi
 
 # Сохраняем выбранное зеркало в настройки, чтобы им пользовалось и самообновление
 if [ -n "$KT_MIRRORS" ]; then
@@ -186,12 +207,25 @@ fi
 # Команды запуска: keentools, kt (короткий алиас), keenkit (алиас на
 # случай, если удобнее ассоциировать команду не с "инструментами", а с
 # "набором" проектов — оба указывают на один и тот же keentools.sh)
+#
+# NEW: обёртка защищена от бесконечной рекурсии переменной-флагом
+# KT_WRAPPER_ACTIVE. Если когда-либо $TARGET/keentools.sh снова окажется
+# подменён такой же обёрткой (баг, ручная правка, повреждённый бэкап —
+# неважно что), вместо тихого бесконечного exec-цикла пользователь
+# увидит понятную ошибку с инструкцией по восстановлению.
 # ---------------------------------------------------------------------------
 if [ -d /opt/bin ]; then
     for cmd in keentools kt keenkit; do
         cat > "/opt/bin/$cmd" << EOF
 #!/bin/sh
-exec sh "$TARGET/keentools.sh" "\$@"
+if [ "\$KT_WRAPPER_ACTIVE" = "1" ]; then
+    echo "[✘] Обнаружен рекурсивный запуск: $TARGET/keentools.sh, похоже, повреждён" >&2
+    echo "    (содержит саму команду-обёртку вместо менеджера)." >&2
+    echo "    Переустановите KeenTools:" >&2
+    echo "      curl -fsSL https://raw.githubusercontent.com/${KT_GITHUB_OWNER}/${KT_GITHUB_REPO}/refs/heads/${KT_GITHUB_BRANCH}/install.sh | sh" >&2
+    exit 1
+fi
+KT_WRAPPER_ACTIVE=1 exec sh "$TARGET/keentools.sh" "\$@"
 EOF
         chmod +x "/opt/bin/$cmd"
     done

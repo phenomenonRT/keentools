@@ -47,6 +47,23 @@ kt_download_archive_with_mirrors() {
 }
 
 # ---------------------------------------------------------------------------
+# NEW: проверка целостности keentools.sh — используется и при первичной
+# установке (install.sh дублирует эту логику для bootstrap-случая, когда
+# lib/ ещё не на месте), и здесь, при самообновлении. Признак настоящего
+# файла менеджера — наличие определения главной функции меню и разумный
+# размер (битый/усечённый файл или файл-обёртка будут значительно короче).
+# ---------------------------------------------------------------------------
+kt_verify_keentools_sh() {
+    f="$1"
+    [ -f "$f" ] || return 1
+    grep -q 'kt_menu_main()' "$f" 2>/dev/null || return 1
+    grep -q 'kt_menu_main$' "$f" 2>/dev/null || return 1
+    lines=$(wc -l < "$f" 2>/dev/null || echo 0)
+    [ "$lines" -gt 20 ] 2>/dev/null || return 1
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # Обновление самого менеджера
 # ---------------------------------------------------------------------------
 kt_self_current_version() {
@@ -121,6 +138,15 @@ kt_self_update() {
         return 1
     fi
 
+    # NEW: проверяем содержимое ДО того, как затирать рабочую установку —
+    # если скачанный keentools.sh битый/неполный, лучше вообще не трогать
+    # текущие файлы, чем заменить рабочую версию на нерабочую.
+    if ! kt_verify_keentools_sh "$extracted_dir/keentools.sh"; then
+        kt_err "Скачанный keentools.sh не прошёл проверку целостности. Обновление отменено, текущие файлы не тронуты."
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
     if ! cp -a "$extracted_dir/." "$KT_HOME/" 2>/dev/null; then
         kt_err "Ошибка копирования файлов. Восстанавливаю предыдущую версию..."
         [ -n "$backup_file" ] && kt_backup_restore "$backup_file"
@@ -129,6 +155,22 @@ kt_self_update() {
     fi
 
     find "$KT_HOME" -name "*.sh" -exec chmod +x {} \; 2>/dev/null
+
+    # NEW: финальная проверка уже установленного файла — на случай сбоя
+    # именно на этапе cp/файловой системы. Если что-то пошло не так,
+    # автоматически откатываемся на бэкап, а не оставляем сломанную
+    # установку висеть до следующего запуска.
+    if ! kt_verify_keentools_sh "$KT_HOME/keentools.sh"; then
+        kt_err "После копирования keentools.sh повреждён. Автоматически восстанавливаю предыдущую версию..."
+        if [ -n "$backup_file" ] && kt_backup_restore "$backup_file"; then
+            kt_ok "Предыдущая версия восстановлена"
+        else
+            kt_err "Не удалось восстановить бэкап автоматически — переустановите KeenTools вручную:"
+            kt_err "  curl -fsSL https://raw.githubusercontent.com/${KT_GITHUB_OWNER}/${KT_GITHUB_REPO}/refs/heads/${KT_GITHUB_BRANCH}/install.sh | sh"
+        fi
+        rm -rf "$tmp_dir"
+        return 1
+    fi
 
     rm -rf "$tmp_dir"
     kt_ok "5/5 KeenTools обновлён до $remote_ver"
