@@ -21,6 +21,25 @@ KT_GITHUB_ARCHIVE_URL="https://github.com/${KT_GITHUB_OWNER}/${KT_GITHUB_REPO}/a
 
 TARGET="/opt/etc/keentools"
 
+# ---------------------------------------------------------------------------
+# При запуске через "curl ... | sh" stdin самого sh — это уже байты
+# скрипта, а не терминал пользователя. Обычный "read" в этом случае
+# читает не ввод с клавиатуры, а хвост самого скрипта, что портит его
+# дальнейший разбор ("unexpected done" и т.п.). Поэтому весь интерактивный
+# ввод читаем напрямую из /dev/tty; если tty недоступен (неинтерактивный
+# запуск, cron, CI) — используем безопасное значение по умолчанию.
+# kt_read_tty <var_name> <default_value>
+# ---------------------------------------------------------------------------
+kt_read_tty() {
+    var_name="$1"; default_val="$2"
+    if [ -e /dev/tty ]; then
+        read -r "$var_name" < /dev/tty
+    else
+        echo "[i] Нет доступного терминала — использую значение по умолчанию: $default_val"
+        eval "$var_name=\"\$default_val\""
+    fi
+}
+
 echo "================================"
 echo " Установка KeenTools"
 echo "================================"
@@ -47,10 +66,10 @@ if [ "$MODE" = "remote" ]; then
     echo "  1) GitHub (по умолчанию)"
     echo "  2) Своё зеркало / прокси"
     printf "Выбор [1]: "
-    read -r src_choice
+    kt_read_tty src_choice "1"
     if [ "$src_choice" = "2" ]; then
         printf "Введите базовый URL зеркала (например https://ghproxy.com): "
-        read -r mirror_url
+        kt_read_tty mirror_url ""
         mirror_url="${mirror_url%/}"
         if [ -n "$mirror_url" ]; then
             KT_GITHUB_ARCHIVE_URL="${mirror_url}/${KT_GITHUB_OWNER}/${KT_GITHUB_REPO}/archive/refs/heads/${KT_GITHUB_BRANCH}.tar.gz"
@@ -75,7 +94,7 @@ done
 if [ -n "$missing" ]; then
     echo "Не найдены пакеты:$missing"
     printf "Установить сейчас через opkg? [Y/N]: "
-    read -r ans
+    kt_read_tty ans "Y"
     case "$ans" in
         [Yy]*)
             opkg update
