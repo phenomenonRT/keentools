@@ -24,10 +24,10 @@ while true; do
     echo "2. Остановить"
     echo "0. Назад"
     printf "Выбор: "
-    read -r c
+    kt_read c
     case "$c" in
-        1) "$KT_MODULE_DIR/start.sh"; printf "\nEnter..."; read -r _ ;;
-        2) "$KT_MODULE_DIR/stop.sh"; printf "\nEnter..."; read -r _ ;;
+        1) "$KT_MODULE_DIR/start.sh"; printf "\nEnter..."; kt_read _ ;;
+        2) "$KT_MODULE_DIR/stop.sh"; printf "\nEnter..."; kt_read _ ;;
         0) exit 0 ;;
         *) echo "Неверный выбор" ;;
     esac

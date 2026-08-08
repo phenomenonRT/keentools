@@ -68,7 +68,7 @@ kt_menu_catalog() {
         echo " 0. Назад"
         echo
         printf "Выберите проект для установки (можно несколько через пробел): "
-        read -r choice
+        kt_read choice
         [ "$choice" = "0" ] && return
 
         for c in $choice; do
@@ -140,7 +140,7 @@ kt_menu_module() {
         echo "0. Назад"
         echo
         printf "Выбор: "
-        read -r c
+        kt_read c
 
         case "$c" in
             0) return ;;
@@ -209,7 +209,7 @@ kt_menu_settings() {
         echo " 0. Назад"
         echo
         printf "Выбор: "
-        read -r c
+        kt_read c
         case "$c" in
             1)
                 cur=$(kt_config_get KT_CHECK_ON_START)
@@ -217,7 +217,7 @@ kt_menu_settings() {
                 ;;
             2)
                 echo "1) always  2) daily  3) weekly  4) never"
-                printf "Выбор: "; read -r f
+                printf "Выбор: "; kt_read f
                 case "$f" in
                     1) kt_config_set KT_CHECK_FREQUENCY always ;;
                     2) kt_config_set KT_CHECK_FREQUENCY daily ;;
@@ -235,7 +235,7 @@ kt_menu_settings() {
                 ;;
             5)
                 printf "Новый URL (пусто чтобы очистить): "
-                read -r url
+                kt_read url
                 kt_config_set KT_REPO_URL "$url"
                 ;;
             6)
@@ -249,7 +249,7 @@ kt_menu_settings() {
                 ;;
             8)
                 echo "1) github  2) mirror"
-                printf "Выбор: "; read -r s
+                printf "Выбор: "; kt_read s
                 case "$s" in
                     1) kt_config_set KT_INSTALL_SOURCE github ;;
                     2) kt_config_set KT_INSTALL_SOURCE mirror ;;
@@ -257,12 +257,12 @@ kt_menu_settings() {
                 ;;
             9)
                 printf "Зеркала через запятую (пусто чтобы очистить): "
-                read -r mirrors
+                kt_read mirrors
                 kt_config_set KT_GITHUB_MIRRORS "$mirrors"
                 ;;
             10)
                 printf "На сколько дней приостановить проверку обновлений (0 = снять паузу): "
-                read -r d
+                kt_read d
                 case "$d" in
                     ''|*[!0-9]*) kt_warn "Введите число" ;;
                     *) kt_pause_updates "$d" ;;
@@ -306,7 +306,7 @@ kt_menu_about() {
     echo "0. Назад"
     echo
     printf "Выбор: "
-    read -r c
+    kt_read c
     case "$c" in
         1) kt_check_all_updates; kt_pause ;;
         2)
@@ -332,7 +332,7 @@ kt_menu_backup() {
     echo "0. Назад"
     echo
     printf "Выбор: "
-    read -r c
+    kt_read c
     case "$c" in
         1) kt_backup_create; kt_pause ;;
         2)
@@ -346,7 +346,7 @@ kt_menu_backup() {
             i=1
             for f in "$@"; do echo "$i) $(basename "$f")"; i=$((i+1)); done
             printf "Какую восстановить (0 - отмена): "
-            read -r n
+            kt_read n
             [ "$n" = "0" ] && return
             sel=$(kt_nth "$n" "$@")
             [ -n "$sel" ] && kt_backup_restore "$sel"
@@ -412,7 +412,7 @@ kt_menu_main() {
         echo "[Q] Выход"
         echo
         printf "Выбор: "
-        read -r c
+        kt_read c
 
         case "$c" in
             [0-9]*)

@@ -78,12 +78,22 @@ kt_line() { printf "%b--------------------------------%b\n" "$C_GRAY" "$C_RESET"
 # ---------------------------------------------------------------------------
 # Ввод пользователя
 # ---------------------------------------------------------------------------
+kt_read() {
+    if [ -t 0 ]; then
+        read -r "$1"
+    elif [ -c /dev/tty ] && [ -r /dev/tty ]; then
+        read -r "$1" < /dev/tty 2>/dev/null || eval "$1=''"
+    else
+        eval "$1=''"
+    fi
+}
+
 kt_confirm() {
     # kt_confirm "Вопрос?" -> 0 = да, 1 = нет
     q="$1"
     while true; do
         printf "%s [Y/N]: " "$q"
-        read -r ans
+        kt_read ans
         case "$ans" in
             [YyДд]*) return 0 ;;
             [NnНн]*) return 1 ;;
@@ -94,7 +104,7 @@ kt_confirm() {
 
 kt_pause() {
     printf "\nНажмите Enter для продолжения..."
-    read -r _
+    kt_read _
 }
 
 # ---------------------------------------------------------------------------

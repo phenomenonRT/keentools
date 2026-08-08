@@ -26,9 +26,19 @@ echo " Установка KeenTools"
 echo "================================"
 echo
 
+kt_read() {
+    if [ -t 0 ]; then
+        read -r "$1"
+    elif [ -c /dev/tty ] && [ -r /dev/tty ]; then
+        read -r "$1" < /dev/tty 2>/dev/null || eval "$1=''"
+    else
+        eval "$1=''"
+    fi
+}
+
 CALLER_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd || pwd)
 
-if [ -f "$CALLER_DIR/keentools.sh" ] && [ -d "$CALLER_DIR/lib" ]; then
+if [ -f "$0" ] && [ -f "$CALLER_DIR/keentools.sh" ] && [ -d "$CALLER_DIR/lib" ]; then
     MODE="local"
     SRC_DIR="$CALLER_DIR"
     echo "[i] Обнаружена локальная копия проекта: $SRC_DIR"
@@ -47,10 +57,10 @@ if [ "$MODE" = "remote" ]; then
     echo "  1) GitHub (по умолчанию)"
     echo "  2) Своё зеркало / прокси"
     printf "Выбор [1]: "
-    read -r src_choice
+    kt_read src_choice
     if [ "$src_choice" = "2" ]; then
         printf "Введите базовый URL зеркала (например https://ghproxy.com): "
-        read -r mirror_url
+        kt_read mirror_url
         mirror_url="${mirror_url%/}"
         if [ -n "$mirror_url" ]; then
             KT_GITHUB_ARCHIVE_URL="${mirror_url}/${KT_GITHUB_OWNER}/${KT_GITHUB_REPO}/archive/refs/heads/${KT_GITHUB_BRANCH}.tar.gz"
@@ -75,9 +85,9 @@ done
 if [ -n "$missing" ]; then
     echo "Не найдены пакеты:$missing"
     printf "Установить сейчас через opkg? [Y/N]: "
-    read -r ans
+    kt_read ans
     case "$ans" in
-        [Yy]*)
+        [YyДд]*)
             opkg update
             for dep in $missing; do
                 opkg install "$dep"
@@ -123,7 +133,13 @@ if [ "$MODE" = "remote" ]; then
         exit 1
     fi
 
-    extracted_dir=$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n1)
+    extracted_dir=""
+    for d in "$tmp_dir"/*; do
+        if [ -d "$d" ]; then
+            extracted_dir="$d"
+            break
+        fi
+    done
     if [ -z "$extracted_dir" ] || [ ! -f "$extracted_dir/keentools.sh" ]; then
         echo "[✘] Неожиданная структура архива — не нашёл keentools.sh"
         rm -rf "$tmp_dir"
@@ -145,7 +161,7 @@ kt_verify_source_keentools_sh() {
     f="$1"
     [ -f "$f" ] || return 1
     grep -q 'kt_menu_main()' "$f" 2>/dev/null || return 1
-    grep -q 'kt_menu_main$' "$f" 2>/dev/null || return 1
+    grep -E -q '^[[:space:]]*kt_menu_main([[:space:]]|$)' "$f" 2>/dev/null || return 1
     # Исходник не должен быть просто однострочной обёрткой exec
     lines=$(wc -l < "$f" 2>/dev/null || echo 0)
     [ "$lines" -gt 20 ] 2>/dev/null || return 1

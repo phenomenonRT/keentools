@@ -57,7 +57,7 @@ kt_verify_keentools_sh() {
     f="$1"
     [ -f "$f" ] || return 1
     grep -q 'kt_menu_main()' "$f" 2>/dev/null || return 1
-    grep -q 'kt_menu_main$' "$f" 2>/dev/null || return 1
+    grep -E -q '^[[:space:]]*kt_menu_main([[:space:]]|$)' "$f" 2>/dev/null || return 1
     lines=$(wc -l < "$f" 2>/dev/null || echo 0)
     [ "$lines" -gt 20 ] 2>/dev/null || return 1
     return 0
@@ -130,7 +130,13 @@ kt_self_update() {
         return 1
     fi
 
-    extracted_dir=$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n1)
+    extracted_dir=""
+    for d in "$tmp_dir"/*; do
+        if [ -d "$d" ]; then
+            extracted_dir="$d"
+            break
+        fi
+    done
     if [ -z "$extracted_dir" ] || [ ! -f "$extracted_dir/keentools.sh" ]; then
         kt_err "Неожиданная структура архива. Восстанавливаю предыдущую версию..."
         [ -n "$backup_file" ] && kt_backup_restore "$backup_file"
