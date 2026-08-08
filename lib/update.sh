@@ -153,6 +153,10 @@ kt_self_update() {
         return 1
     fi
 
+    if [ -L "$KT_HOME/keentools.sh" ]; then
+        rm -f "$KT_HOME/keentools.sh"
+    fi
+
     if ! cp -a "$extracted_dir/." "$KT_HOME/" 2>/dev/null; then
         kt_err "Ошибка копирования файлов. Восстанавливаю предыдущую версию..."
         [ -n "$backup_file" ] && kt_backup_restore "$backup_file"
@@ -162,10 +166,27 @@ kt_self_update() {
 
     find "$KT_HOME" -name "*.sh" -exec chmod +x {} \; 2>/dev/null
 
+    if [ -d /opt/bin ]; then
+        for cmd in keentools kt keenkit; do
+            rm -f "/opt/bin/$cmd"
+            cat > "/opt/bin/$cmd" << EOF
+#!/bin/sh
+if [ "\$KT_WRAPPER_ACTIVE" = "1" ]; then
+    echo "[✘] Обнаружен рекурсивный запуск: $KT_HOME/keentools.sh, похоже, повреждён" >&2
+    echo "    (содержит саму команду-обёртку вместо менеджера)." >&2
+    echo "    Переустановите KeenTools:" >&2
+    echo "      curl -fsSL https://raw.githubusercontent.com/${KT_GITHUB_OWNER}/${KT_GITHUB_REPO}/refs/heads/${KT_GITHUB_BRANCH}/install.sh | sh" >&2
+    exit 1
+fi
+KT_WRAPPER_ACTIVE=1 exec sh "$KT_HOME/keentools.sh" "\$@"
+EOF
+            chmod +x "/opt/bin/$cmd"
+        done
+    fi
+
     # NEW: финальная проверка уже установленного файла — на случай сбоя
-    # именно на этапе cp/файловой системы. Если что-то пошло не так,
-    # автоматически откатываемся на бэкап, а не оставляем сломанную
-    # установку висеть до следующего запуска.
+    # на этапе cp, записи или создания обёрток. Если что-то пошло не так,
+    # автоматически откатываемся на бэкап.
     if ! kt_verify_keentools_sh "$KT_HOME/keentools.sh"; then
         kt_err "После копирования keentools.sh повреждён. Автоматически восстанавливаю предыдущую версию..."
         if [ -n "$backup_file" ] && kt_backup_restore "$backup_file"; then

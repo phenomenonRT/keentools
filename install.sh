@@ -183,25 +183,13 @@ if [ -d "$TARGET" ] && [ "$SRC_DIR" != "$TARGET" ]; then
 fi
 
 mkdir -p "$TARGET"
+if [ -L "$TARGET/keentools.sh" ]; then
+    rm -f "$TARGET/keentools.sh"
+fi
 cp -a "$SRC_DIR/." "$TARGET/" 2>/dev/null || true
 
 chmod +x "$TARGET/keentools.sh"
 find "$TARGET" -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
-
-# ---------------------------------------------------------------------------
-# NEW: проверка целостности ПОСЛЕ копирования — на случай, если что-то
-# пошло не так уже на этапе cp (диск, права, гонка с другим процессом).
-# Если файл в итоге не тот — явно сообщаем, а не оставляем тихо висящую
-# команду keentools/kt.
-# ---------------------------------------------------------------------------
-if ! kt_verify_source_keentools_sh "$TARGET/keentools.sh"; then
-    echo "[✘] После копирования файл $TARGET/keentools.sh не прошёл проверку целостности."
-    echo "    Установка НЕ завершена корректно. Не запускайте keentools/kt в этом состоянии."
-    echo "    Повторите установку заново:"
-    echo "      curl -fsSL https://raw.githubusercontent.com/${KT_GITHUB_OWNER}/${KT_GITHUB_REPO}/refs/heads/${KT_GITHUB_BRANCH}/install.sh | sh"
-    [ "$MODE" = "remote" ] && rm -rf "$tmp_dir"
-    exit 1
-fi
 
 # Сохраняем выбранное зеркало в настройки, чтобы им пользовалось и самообновление
 if [ -n "$KT_MIRRORS" ]; then
@@ -225,13 +213,12 @@ fi
 # "набором" проектов — оба указывают на один и тот же keentools.sh)
 #
 # NEW: обёртка защищена от бесконечной рекурсии переменной-флагом
-# KT_WRAPPER_ACTIVE. Если когда-либо $TARGET/keentools.sh снова окажется
-# подменён такой же обёрткой (баг, ручная правка, повреждённый бэкап —
-# неважно что), вместо тихого бесконечного exec-цикла пользователь
-# увидит понятную ошибку с инструкцией по восстановлению.
+# KT_WRAPPER_ACTIVE. Перед записью обёртки старый файл/симлинк удаляется
+# через rm -f, чтобы 'cat >' не перезаписывал целевой keentools.sh по симлинку.
 # ---------------------------------------------------------------------------
 if [ -d /opt/bin ]; then
     for cmd in keentools kt keenkit; do
+        rm -f "/opt/bin/$cmd"
         cat > "/opt/bin/$cmd" << EOF
 #!/bin/sh
 if [ "\$KT_WRAPPER_ACTIVE" = "1" ]; then
@@ -250,7 +237,19 @@ else
     echo "[i] /opt/bin не найден — запускайте так: sh $TARGET/keentools.sh"
 fi
 
+# ---------------------------------------------------------------------------
+# NEW: проверка целостности ПОСЛЕ копирования и создания обёрток.
+# ---------------------------------------------------------------------------
+if ! kt_verify_source_keentools_sh "$TARGET/keentools.sh"; then
+    echo "[✘] После установки файл $TARGET/keentools.sh не прошёл проверку целостности."
+    echo "    Установка НЕ завершена корректно. Не запускайте keentools/kt в этом состоянии."
+    echo "    Повторите установку заново:"
+    echo "      curl -fsSL https://raw.githubusercontent.com/${KT_GITHUB_OWNER}/${KT_GITHUB_REPO}/refs/heads/${KT_GITHUB_BRANCH}/install.sh | sh"
+    exit 1
+fi
+
 echo
 echo "Готово! Запустите менеджер любой из команд:"
 echo "  keentools   /   kt   /   keenkit"
 echo "(или: sh $TARGET/keentools.sh)"
+
