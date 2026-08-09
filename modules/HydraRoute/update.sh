@@ -1,5 +1,5 @@
 #!/bin/sh
-# echo "У демо-сервиса нет реального апдейта — это заглушка для проверки меню"
+# update.sh — обновление HydraRoute Neo и сопутствующих пакетов (hrweb, xray и т.д.)
 opkg update
-opkg upgrade hrneo
+opkg upgrade
 exit 0

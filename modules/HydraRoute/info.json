@@ -2,7 +2,7 @@
   "name": "HydraRoute Neo",
   "version": "1.0.0",
   "author": "Ground-Zerro",
-  "description": "Инструмент для раздельной маршрутизации трафика по доменам и CIDR с использованием туннелей на роутерах Keenetic.",
+  "description": "Демон раздельной маршрутизации трафика по доменам и CIDR через туннели на роутерах Keenetic (DNS + L7-перехват TLS SNI/HTTP Host).",
   "homepage": "https://github.com/Ground-Zerro/HydraRoute",
   "update_url": "",
   "dependencies": []
