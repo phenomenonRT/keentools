@@ -120,8 +120,8 @@ kt_menu_module() {
             eval "kt_item_${n}_script=\"\$2\""
         }
 
-        add_item "Запустить"        "start.sh"
-        add_item "Остановить"       "stop.sh"
+        kt_module_has_script "$name" start.sh     && add_item "Запустить"         "start.sh"
+        kt_module_has_script "$name" stop.sh      && add_item "Остановить"        "stop.sh"
         kt_module_has_script "$name" restart.sh   && add_item "Перезапустить"     "restart.sh"
         kt_module_has_script "$name" update.sh    && add_item "Обновить"          "update.sh"
         kt_module_has_script "$name" configure.sh && add_item "Настроить"         "configure.sh"
