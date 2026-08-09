@@ -1,8 +1,8 @@
 {
-  "name": "Пример-сервис (демо)",
+  "name": "AWG-Manager",
   "version": "1.0.0",
-  "author": "KeenTools",
-  "description": "Тестовый фоновый сервис для проверки работы менеджера без реальных проектов",
+  "author": "hoaxisr",
+  "description": "AmneziaWG tunnel manager with web interface for Keenetic routers",
   "homepage": "",
   "update_url": "",
   "dependencies": []
