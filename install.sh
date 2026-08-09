@@ -10,7 +10,7 @@
 # Скрипт: спрашивает источник установки (GitHub или своё зеркало),
 # проверяет Entware/opkg, ставит зависимости (curl, jq) через opkg,
 # копирует файлы в /opt/etc/keentools, делает всё исполняемым и
-# добавляет команды-алиасы: keentools, kt, keenkit.
+# добавляет команды-алиасы: keentools, kt.
 
 set -e
 
@@ -221,16 +221,14 @@ if [ "$MODE" = "remote" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Команды запуска: keentools, kt (короткий алиас), keenkit (алиас на
-# случай, если удобнее ассоциировать команду не с "инструментами", а с
-# "набором" проектов — оба указывают на один и тот же keentools.sh)
+# Команды запуска: keentools, kt (короткий алиас)
 #
 # NEW: обёртка защищена от бесконечной рекурсии переменной-флагом
 # KT_WRAPPER_ACTIVE. Перед записью обёртки старый файл/симлинк удаляется
 # через rm -f, чтобы 'cat >' не перезаписывал целевой keentools.sh по симлинку.
 # ---------------------------------------------------------------------------
 if [ -d /opt/bin ]; then
-    for cmd in keentools kt keenkit; do
+    for cmd in keentools kt; do
         rm -f "/opt/bin/$cmd"
         cat > "/opt/bin/$cmd" << EOF
 #!/bin/sh
@@ -245,7 +243,7 @@ KT_WRAPPER_ACTIVE=1 exec sh "$TARGET/keentools.sh" "\$@"
 EOF
         chmod +x "/opt/bin/$cmd"
     done
-    echo "[✔] Добавлены команды: keentools, kt, keenkit"
+    echo "[✔] Добавлены команды: keentools, kt"
 else
     echo "[i] /opt/bin не найден — запускайте так: sh $TARGET/keentools.sh"
 fi
@@ -263,6 +261,6 @@ fi
 
 echo
 echo "Готово! Запустите менеджер любой из команд:"
-echo "  keentools   /   kt   /   keenkit"
+echo "  keentools   /   kt "
 echo "(или: sh $TARGET/keentools.sh)"
 
