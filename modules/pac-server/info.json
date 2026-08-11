@@ -1,0 +1,9 @@
+{
+  "name": "PAC Server",
+  "version": "1.0.0",
+  "author": "phenomenonRT",
+  "description": "Go-сервер для создания, редактирования и раздачи нескольких PAC-файлов (веб-интерфейс + опциональная настройка firewall под LAN).",
+  "homepage": "https://github.com/phenomenonRT/pac-server",
+  "update_url": "",
+  "dependencies": ["curl"]
+}
