@@ -1,0 +1,9 @@
+{
+  "name": "MagiTrickle",
+  "version": "1.0.0",
+  "author": "MagiTrickle",
+  "description": "Утилита для точечной маршрутизации сетевого трафика по доменным именам (DNS-based split tunneling) с веб-интерфейсом, для роутеров с Entware.",
+  "homepage": "https://magitrickle.dev/",
+  "update_url": "",
+  "dependencies": []
+}
