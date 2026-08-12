@@ -1,15 +1,8 @@
 #!/bin/sh
-pid_file="$KT_MODULE_DIR/data/service.pid"
-
-if [ ! -f "$pid_file" ]; then
-    exit 0
+init="/opt/etc/init.d/S99awg-manager"
+if [ -x "$init" ]; then
+    "$init" stop
+else
+    echo "Не найден init-скрипт $init"
+    exit 1
 fi
-
-pid=$(cat "$pid_file")
-if kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null
-    sleep 1
-    kill -9 "$pid" 2>/dev/null
-fi
-rm -f "$pid_file"
-exit 0

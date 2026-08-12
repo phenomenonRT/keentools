@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "author": "hoaxisr",
   "description": "AmneziaWG tunnel manager with web interface for Keenetic routers",
-  "homepage": "",
+  "homepage": "https://awgm.hoaxisr.ru/install/",
   "update_url": "",
   "dependencies": []
 }

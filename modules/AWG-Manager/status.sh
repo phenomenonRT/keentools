@@ -1,13 +1,17 @@
 #!/bin/sh
-pid_file="$KT_MODULE_DIR/data/service.pid"
+# status.sh — 0 = запущен, 1 = остановлен, 2 = неизвестно.
+init="/opt/etc/init.d/S99awg-manager"
 
-if [ ! -f "$pid_file" ]; then
-    exit 1
+if [ -x "$init" ]; then
+    "$init" status >/dev/null 2>&1
+    code=$?
+    if [ "$code" -eq 0 ] || [ "$code" -eq 1 ]; then
+        exit "$code"
+    fi
 fi
 
-pid=$(cat "$pid_file")
-if kill -0 "$pid" 2>/dev/null; then
-    exit 0
-else
-    exit 1
+if command -v pidof >/dev/null 2>&1; then
+    pidof awg-manager >/dev/null 2>&1 && exit 0 || exit 1
 fi
+
+exit 2

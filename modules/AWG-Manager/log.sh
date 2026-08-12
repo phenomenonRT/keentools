@@ -1,7 +1,13 @@
 #!/bin/sh
-log_file="$KT_MODULE_DIR/data/example-service.log"
-if [ -f "$log_file" ]; then
-    tail -n 50 "$log_file"
+log_dir="/opt/var/log/awg-manager"
+
+if [ -d "$log_dir" ]; then
+    log_file=$(ls -t "$log_dir"/*.log 2>/dev/null | head -n1)
+    if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+        tail -n 50 "$log_file"
+    else
+        echo "Лог-файлы не найдены в $log_dir"
+    fi
 else
-    echo "Лог пока пуст — сервис ещё не запускался"
+    echo "Каталог логов не найден: $log_dir"
 fi
